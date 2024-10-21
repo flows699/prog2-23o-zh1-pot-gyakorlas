@@ -3,9 +3,11 @@ import sqlite3
 import matplotlib.pyplot as plt
 import os
 import threading
+import matplotlib
 
 app = Flask(__name__)
 DATABASE = "db.sqlite"
+matplotlib.use('Agg') #ne használjon grafikus megjelenítést
 
 
 def get_db():
@@ -45,9 +47,8 @@ def show_rooms():
         plt.ylabel("Occupancy")
         os.makedirs("static", exist_ok=True)
         plt.savefig("static/occupancy.png")
-        plt.close()  # Close the plot to avoid memory issues
+        plt.close()
 
-    # Start a new thread to create the plot
     threading.Thread(target=create_plot).start()
 
     return render_template("rooms.html", rooms=rooms)
@@ -61,14 +62,21 @@ def get_room(room_name):
         start_time = int(request.form['start_time'])
         end_time = int(request.form['end_time'])
 
-        # Ellenőrizd, hogy az end_time nagyobb-e, mint a start_time
         if start_time >= end_time:
             return "End time must be greater than start time", 400
 
-        # Adjon hozzá foglalást
+        all_reservations_day = db.execute("SELECT reservation_start_time, reservation_end_time FROM reservations WHERE room_name = ? AND day = ?", (room_name, day)).fetchall()
+
+        for reservation in all_reservations_day:
+            for hour in range(reservation["reservation_start_time"], reservation["reservation_end_time"]):
+                if start_time <= hour < end_time: 
+                    return "Time already reserved", 400
+        
+
         db.execute("INSERT INTO reservations (room_name, day, reservation_start_time, reservation_end_time, event) VALUES (?, ?, ?, ?, ?)", 
                    (room_name, day, start_time, end_time, event_name))
-        db.execute("UPDATE rooms SET occupancy = occupancy + 1 WHERE room_name = ?", (room_name,))
+        hours = end_time - start_time
+        db.execute("UPDATE rooms SET occupancy = occupancy + ? WHERE room_name = ?", (hours, room_name,))
         db.commit()
 
         return redirect(url_for('get_room', room_name=room_name))
@@ -84,7 +92,6 @@ def get_room(room_name):
         start_hour = reservation["reservation_start_time"]
         event = reservation["event"]
         
-        # Foglalás beállítása az időintervallumban
         for hour in range(start_hour, reservation["reservation_end_time"]):
             reservations_matrix[day][hour] = event
 
@@ -95,6 +102,7 @@ def get_room(room_name):
 def clear_reservations():
     db = get_db()
     db.execute("DELETE FROM reservations")
+    db.execute("UPDATE rooms SET occupancy = 0")
     db.commit()
 
     return redirect(url_for('show_rooms'))
